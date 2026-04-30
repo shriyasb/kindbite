@@ -1,32 +1,50 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import api from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { MOCK_FOOD_POSTS } from '../utils/mockData';
 import { formatDistanceToNow, isPast } from 'date-fns';
 import toast from 'react-hot-toast';
 
-const statusColor = {
-  available: 'bg-green-100 text-green-700',
-  accepted: 'bg-blue-100 text-blue-700',
-  picked_up: 'bg-yellow-100 text-yellow-700',
-  delivered: 'bg-purple-100 text-purple-700',
-  expired: 'bg-gray-100 text-gray-500',
-  cancelled: 'bg-red-100 text-red-500',
-};
+const statusColor = { available: 'bg-green-100 text-green-700', accepted: 'bg-blue-100 text-blue-700', picked_up: 'bg-yellow-100 text-yellow-700', delivered: 'bg-purple-100 text-purple-700', expired: 'bg-gray-100 text-gray-500', cancelled: 'bg-red-100 text-red-500' };
+
+function FoodTypeTag({ type }) {
+  const cls = { veg: 'badge-veg', 'non-veg': 'badge-nonveg', vegan: 'badge-vegan', mixed: 'badge-mixed' };
+  const labels = { veg: '🟢 Veg', 'non-veg': '🔴 Non-Veg', vegan: '🌿 Vegan', mixed: '🟡 Mixed' };
+  return <span className={cls[type] || 'badge-mixed'}>{labels[type]}</span>;
+}
 
 export default function DonorDashboard() {
   const { user } = useAuth();
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
 
-  // Only show posts belonging to this donor (u001) or all for demo
-  const myPosts = MOCK_FOOD_POSTS.filter(p => p.donor._id === 'u001');
-  const filtered = filter === 'all' ? myPosts : myPosts.filter(p => p.status === filter);
+  const fetchPosts = useCallback(async () => {
+    try {
+      const params = filter !== 'all' ? { status: filter } : {};
+      const { data } = await api.get('/food-posts/my', { params });
+      setPosts(data.posts);
+    } catch { toast.error('Failed to load posts'); }
+    finally { setLoading(false); }
+  }, [filter]);
 
-  const totalMeals = myPosts.filter(p => p.status === 'delivered').reduce((s, p) => s + (p.mealsSaved || 0), 0);
+  useEffect(() => { fetchPosts(); }, [fetchPosts]);
+
+  const cancelPost = async (id) => {
+    if (!window.confirm('Cancel this donation post?')) return;
+    try {
+      await api.delete(`/food-posts/${id}`);
+      toast.success('Post cancelled');
+      fetchPosts();
+    } catch { toast.error('Failed to cancel'); }
+  };
+
+  const totalMeals = posts.filter(p => p.status === 'delivered').reduce((s, p) => s + (p.mealsSaved || p.quantity), 0);
 
   return (
     <div className="min-h-screen bg-orange-50 py-8 px-4">
       <div className="max-w-5xl mx-auto">
+        {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="font-display text-3xl font-bold text-gray-900">Donor Dashboard</h1>
@@ -40,8 +58,8 @@ export default function DonorDashboard() {
           {[
             { label: 'Total Donations', value: user?.totalDonations || 0, icon: '📦', color: 'text-brand-600' },
             { label: 'Meals Saved', value: user?.totalMealsSaved || totalMeals, icon: '🍽️', color: 'text-green-600' },
-            { label: 'Rating', value: `${user?.rating?.toFixed(1)} ⭐`, icon: '⭐', color: 'text-yellow-600' },
-            { label: 'Active Posts', value: myPosts.filter(p => p.status === 'available').length, icon: '✅', color: 'text-blue-600' },
+            { label: 'Rating', value: user?.rating ? `${user.rating.toFixed(1)} ⭐` : 'N/A', icon: '⭐', color: 'text-yellow-600' },
+            { label: 'Active Posts', value: posts.filter(p => p.status === 'available').length, icon: '✅', color: 'text-blue-600' },
           ].map((s) => (
             <div key={s.label} className="card text-center">
               <div className="text-3xl mb-1">{s.icon}</div>
@@ -61,51 +79,55 @@ export default function DonorDashboard() {
           ))}
         </div>
 
-        {/* Posts */}
-        <div className="space-y-4">
-          {filtered.length === 0 ? (
-            <div className="card text-center py-16">
-              <div className="text-5xl mb-4">🍱</div>
-              <p className="text-gray-500">No donations with this status.</p>
-            </div>
-          ) : filtered.map((post) => (
-            <div key={post._id} className="card hover:shadow-md transition">
-              <div className="flex flex-wrap gap-3 items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <h3 className="font-semibold text-gray-900">{post.title}</h3>
-                    {post.isUrgent && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">🚨 Urgent</span>}
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-sm text-gray-500 mb-2">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${post.foodType === 'veg' ? 'bg-green-100 text-green-700' : post.foodType === 'non-veg' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                      {post.foodType}
-                    </span>
-                    <span>👥 {post.quantity} servings</span>
-                    <span>📍 {post.address}</span>
-                  </div>
-                  {post.acceptedBy && (
-                    <div className="text-sm text-blue-600 font-medium">
-                      🤝 Accepted by: {post.acceptedBy.name || post.acceptedBy.organization}
+        {/* Posts list */}
+        {loading ? (
+          <div className="flex justify-center py-20"><div className="animate-spin h-8 w-8 rounded-full border-4 border-brand-500 border-t-transparent" /></div>
+        ) : posts.length === 0 ? (
+          <div className="card text-center py-16">
+            <div className="text-5xl mb-4">🍱</div>
+            <p className="text-gray-500">No donations yet. Start by posting surplus food!</p>
+            <Link to="/post-food" className="btn-primary mt-4 inline-block">Post Food Now</Link>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {posts.map((post) => (
+              <div key={post._id} className="card hover:shadow-md transition">
+                <div className="flex flex-wrap gap-3 items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <h3 className="font-semibold text-gray-900">{post.title}</h3>
+                      {post.isUrgent && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">🚨 Urgent</span>}
                     </div>
-                  )}
-                  <div className="flex gap-4 mt-2 text-xs text-gray-400">
-                    <span>⏱ Expires: {isPast(new Date(post.expiryTime)) ? '❌ Expired' : formatDistanceToNow(new Date(post.expiryTime), { addSuffix: true })}</span>
-                    <span>🕐 Posted {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}</span>
+                    <div className="flex flex-wrap gap-2 text-sm text-gray-500 mb-2">
+                      <FoodTypeTag type={post.foodType} />
+                      <span>👥 {post.quantity} servings</span>
+                      <span>📍 {post.address?.slice(0, 40)}…</span>
+                    </div>
+                    {post.acceptedBy && (
+                      <div className="text-sm text-blue-600 font-medium">
+                        🤝 Accepted by: {post.acceptedBy.name || post.acceptedBy.organization}
+                        {post.acceptedBy.phone && <span className="ml-2 text-gray-500">📞 {post.acceptedBy.phone}</span>}
+                      </div>
+                    )}
+                    <div className="flex gap-4 mt-2 text-xs text-gray-400">
+                      <span>⏱ Expires: {isPast(new Date(post.expiryTime)) ? '❌ Expired' : formatDistanceToNow(new Date(post.expiryTime), { addSuffix: true })}</span>
+                      <span>🕐 Posted {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}</span>
+                    </div>
                   </div>
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <span className={`text-xs font-semibold px-3 py-1 rounded-full ${statusColor[post.status]}`}>
-                    {post.status.replace('_', ' ').toUpperCase()}
-                  </span>
-                  {post.images?.[0] && <img src={post.images[0]} alt="" className="w-16 h-16 rounded-lg object-cover" />}
-                  {post.status === 'available' && (
-                    <button onClick={() => toast.success('Post cancelled (demo)')} className="text-xs text-red-500 hover:underline">Cancel</button>
-                  )}
+                  <div className="flex flex-col items-end gap-2">
+                    <span className={`text-xs font-semibold px-3 py-1 rounded-full ${statusColor[post.status]}`}>
+                      {post.status.replace('_', ' ').toUpperCase()}
+                    </span>
+                    {post.images?.[0] && <img src={post.images[0]} alt="" className="w-16 h-16 rounded-lg object-cover" />}
+                    {post.status === 'available' && (
+                      <button onClick={() => cancelPost(post._id)} className="text-xs text-red-500 hover:underline">Cancel</button>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
