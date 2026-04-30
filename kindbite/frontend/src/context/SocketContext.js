@@ -13,7 +13,7 @@ export const SocketProvider = ({ children }) => {
 
   useEffect(() => {
     const token = localStorage.getItem('kb_token');
-    if (!user || !token) return;
+    if (!user || !token || user.role === 'admin') return;
 
     const socket = io(process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000', {
       auth: { token },
@@ -24,26 +24,26 @@ export const SocketProvider = ({ children }) => {
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
 
-    socket.on('new_food_post', ({ post, message }) => {
+    socket.on('new_food_post', ({ message }) => {
       if (user.role === 'ngo') {
-        toast.success(message, { icon: '🍱', duration: 5000 });
-        setUnreadCount((c) => c + 1);
+        toast.success(message, { duration: 5000 });
+        setUnreadCount(c => c + 1);
       }
     });
 
     socket.on('request_accepted', ({ request }) => {
-      toast.success(`${request.ngo?.name || 'An NGO'} accepted your donation!`, { icon: '🤝', duration: 5000 });
-      setUnreadCount((c) => c + 1);
+      toast.success(`${request.ngo?.name || 'An NGO'} accepted your donation!`, { duration: 5000 });
+      setUnreadCount(c => c + 1);
     });
 
     socket.on('food_picked_up', () => {
-      toast.success('Your donation has been picked up!', { icon: '🚗', duration: 4000 });
-      setUnreadCount((c) => c + 1);
+      toast.success('Your donation has been picked up!', { duration: 4000 });
+      setUnreadCount(c => c + 1);
     });
 
     socket.on('food_delivered', ({ mealsSaved }) => {
-      toast.success(`Donation delivered! ${mealsSaved} meals saved 🎉`, { duration: 6000 });
-      setUnreadCount((c) => c + 1);
+      toast.success(`Donation delivered! ${mealsSaved} meals saved`, { duration: 6000 });
+      setUnreadCount(c => c + 1);
     });
 
     return () => { socket.disconnect(); socketRef.current = null; };
